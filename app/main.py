@@ -1,6 +1,6 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from app.services.groq_service import get_ai_response
+from app.services.groq_service import get_ai_response, GroqServiceError
 
 app = FastAPI()
 
@@ -13,7 +13,11 @@ def health_check():
 
 @app.post("/chat")
 def chat(request: ChatRequest):
-    ai_reply = get_ai_response(request.message)
+    try:
+        ai_reply = get_ai_response(request.message)
+    except GroqServiceError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.message)
+
     return {
         "user_message": request.message,
         "reply": ai_reply
