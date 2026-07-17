@@ -7,23 +7,16 @@ client = OpenAI(
 )
 
 class GroqServiceError(Exception):
-    """Custom exception for Groq API failures, carries a status code + user-friendly message."""
     def __init__(self, status_code: int, message: str):
         self.status_code = status_code
         self.message = message
         super().__init__(message)
 
-def get_ai_response(user_message: str) -> str:
+def get_ai_response(messages: list) -> str:
     try:
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a professional Data Science interviewer conducting a technical interview. Ask clear, relevant questions and respond professionally to candidate answers."
-                },
-                {"role": "user", "content": user_message}
-            ]
+            messages=messages
         )
         return response.choices[0].message.content
 

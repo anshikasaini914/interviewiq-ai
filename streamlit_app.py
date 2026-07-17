@@ -1,5 +1,6 @@
 import streamlit as st
 import requests
+import uuid
 
 BACKEND_URL = "http://127.0.0.1:8000/chat"
 
@@ -9,32 +10,25 @@ st.set_page_config(
     layout="centered"
 )
 
-# --- Custom CSS for a clean, professional look ---
+# --- Custom CSS (same as before) ---
 st.markdown("""
     <style>
-    .main {
-        background-color: #0e1117;
-    }
-    .stChatMessage {
-        border-radius: 10px;
-        padding: 10px;
-    }
-    h1 {
-        font-family: 'Segoe UI', sans-serif;
-        font-weight: 600;
-    }
-    .subtitle {
-        color: #9ca3af;
-        font-size: 15px;
-        margin-top: -10px;
-        margin-bottom: 25px;
-    }
+    .main { background-color: #0e1117; }
+    .stChatMessage { border-radius: 10px; padding: 10px; }
+    h1 { font-family: 'Segoe UI', sans-serif; font-weight: 600; }
+    .subtitle { color: #9ca3af; font-size: 15px; margin-top: -10px; margin-bottom: 25px; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- Header ---
 st.title("InterviewIQ AI")
 st.markdown('<p class="subtitle">AI-Powered Data Science Interview Simulator</p>', unsafe_allow_html=True)
+
+# --- Session state init: session_id + messages ---
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())
+
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
 # --- Sidebar ---
 with st.sidebar:
@@ -44,24 +38,15 @@ with st.sidebar:
     st.divider()
     if st.button("🔄 Reset Conversation"):
         st.session_state.messages = []
+        st.session_state.session_id = str(uuid.uuid4())  # naya session bhi
         st.rerun()
 
-# --- Session state init ---
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+AVATARS = {"user": "👤", "assistant": "💼"}
 
-# --- Avatars ---
-AVATARS = {
-    "user": "👤",
-    "assistant": "💼"
-}
-
-# --- Display conversation ---
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"], avatar=AVATARS[msg["role"]]):
         st.write(msg["content"])
 
-# --- Input ---
 user_input = st.chat_input("Type your answer here...")
 
 if user_input:
@@ -72,7 +57,10 @@ if user_input:
     with st.chat_message("assistant", avatar=AVATARS["assistant"]):
         with st.spinner("Interviewer is typing..."):
             try:
-                response = requests.post(BACKEND_URL, json={"message": user_input})
+                response = requests.post(BACKEND_URL, json={
+                    "session_id": st.session_state.session_id,
+                    "message": user_input
+                })
                 response.raise_for_status()
                 ai_reply = response.json()["reply"]
             except requests.exceptions.RequestException:
