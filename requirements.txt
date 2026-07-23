@@ -6,3 +6,5 @@ openai
 streamlit
 requests
 redis
+sentence-transformers
+chromadb

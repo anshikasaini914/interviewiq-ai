@@ -1,0 +1,30 @@
+[
+    {"id": 1, "topic": "statistics", "level": "beginner", "question": "What is the difference between mean, median, and mode?"},
+    {"id": 2, "topic": "statistics", "level": "beginner", "question": "Explain what a p-value represents in hypothesis testing."},
+    {"id": 3, "topic": "statistics", "level": "intermediate", "question": "What is the Central Limit Theorem and why is it important?"},
+    {"id": 4, "topic": "statistics", "level": "intermediate", "question": "What is the difference between correlation and causation?"},
+    {"id": 5, "topic": "statistics", "level": "advanced", "question": "Explain Type I and Type II errors in hypothesis testing."},
+
+    {"id": 6, "topic": "ml", "level": "beginner", "question": "What is the difference between supervised and unsupervised learning?"},
+    {"id": 7, "topic": "ml", "level": "beginner", "question": "What is overfitting and how can you prevent it?"},
+    {"id": 8, "topic": "ml", "level": "intermediate", "question": "Explain the bias-variance tradeoff."},
+    {"id": 9, "topic": "ml", "level": "intermediate", "question": "What is regularization and why is it used?"},
+    {"id": 10, "topic": "ml", "level": "intermediate", "question": "What is the difference between bagging and boosting?"},
+    {"id": 11, "topic": "ml", "level": "advanced", "question": "Explain how gradient descent works and what learning rate controls."},
+    {"id": 12, "topic": "ml", "level": "advanced", "question": "What is cross-validation and why is it used?"},
+    {"id": 13, "topic": "ml", "level": "beginner", "question": "What is a confusion matrix and what does it show?"},
+
+    {"id": 14, "topic": "python", "level": "beginner", "question": "What is the difference between a list and a tuple in Python?"},
+    {"id": 15, "topic": "python", "level": "beginner", "question": "What is the difference between deep copy and shallow copy in Python?"},
+    {"id": 16, "topic": "python", "level": "intermediate", "question": "Explain how Pandas handles missing data."},
+    {"id": 17, "topic": "python", "level": "intermediate", "question": "What is the difference between loc[] and iloc[] in Pandas?"},
+    {"id": 18, "topic": "python", "level": "intermediate", "question": "What does the groupby() function do in Pandas?"},
+    {"id": 19, "topic": "python", "level": "advanced", "question": "What is a lambda function and when would you use one?"},
+
+    {"id": 20, "topic": "sql", "level": "beginner", "question": "What is the difference between INNER JOIN and LEFT JOIN?"},
+    {"id": 21, "topic": "sql", "level": "beginner", "question": "What is the difference between WHERE and HAVING clauses?"},
+    {"id": 22, "topic": "sql", "level": "intermediate", "question": "What does the GROUP BY clause do in SQL?"},
+    {"id": 23, "topic": "sql", "level": "intermediate", "question": "What is a primary key and how is it different from a foreign key?"},
+    {"id": 24, "topic": "sql", "level": "advanced", "question": "What is a subquery, and how is it different from a JOIN?"},
+    {"id": 25, "topic": "sql", "level": "advanced", "question": "What are window functions in SQL and when would you use them?"}
+]
