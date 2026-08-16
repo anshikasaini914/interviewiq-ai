@@ -58,3 +58,50 @@ def evaluate_answer(question: str, answer: str) -> dict:
     except Exception as e:
         # If evaluation failed, return sade default msg
         return {"is_correct": None, "confidence": "low"}
+
+def generate_report(conversation_history: list, correct_count: int, incorrect_count: int, total_questions: int) -> dict:
+    """Poori conversation ko analyze karke structured feedback report banata hai."""
+
+    # System aur RAG-context messages hata do, sirf actual conversation chahiye
+    clean_conversation = [
+        msg for msg in conversation_history
+        if msg["role"] in ("user", "assistant")
+    ]
+
+    conversation_text = "\n".join(
+        f"{msg['role'].upper()}: {msg['content']}" for msg in clean_conversation
+    )
+
+    try:
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {
+                    "role": "system",
+                    "content": """You are analyzing a completed Data Science interview transcript. Based on the conversation, identify the candidate's strong and weak topics.
+
+Respond ONLY with a JSON object in this exact format:
+{"strong_topics": ["topic1", "topic2"], "weak_topics": ["topic1", "topic2"], "summary": "a 2-3 sentence overall assessment"}
+
+Base topics on subject areas actually discussed (e.g., Python, SQL, Statistics, Machine Learning, Pandas). Keep the summary professional and constructive."""
+                },
+                {
+                    "role": "user",
+                    "content": f"Interview transcript:\n{conversation_text}"
+                }
+            ],
+            response_format={"type": "json_object"}
+        )
+        result = json.loads(response.choices[0].message.content)
+
+    except Exception:
+        result = {"strong_topics": [], "weak_topics": [], "summary": "Report generation unavailable."}
+
+    return {
+        "total_questions": total_questions,
+        "correct_count": correct_count,
+        "incorrect_count": incorrect_count,
+        "strong_topics": result.get("strong_topics", []),
+        "weak_topics": result.get("weak_topics", []),
+        "summary": result.get("summary", "")
+    }

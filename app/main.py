@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from app.services.groq_service import get_ai_response, GroqServiceError, evaluate_answer
+from app.services.groq_service import get_ai_response, GroqServiceError, evaluate_answer, generate_report
 from app.services.vector_store import get_relevant_questions
 from app.core.config import redis_client
 from app.models.interview_state import InterviewState
@@ -140,7 +140,7 @@ def chat(request: ChatRequest):
     rag_context = {"role": "system", "content": f"{RAG_MARKER} " + " | ".join(relevant_questions)}
     history.append(rag_context)
 
-    # Evaluation SIRF tab chalegi jab intro complete ho chuka ho AUR last question technical thi
+    
     if state.phase == "technical" and state.intro_done:
         last_question = None
         for msg in reversed(history):
@@ -157,7 +157,7 @@ def chat(request: ChatRequest):
             elif evaluation.get("is_correct") is False:
                 state.incorrect_count += 1
 
-    # Agar intro abhi tak nahi hua, YE message hi intro tha — ab mark karo aur phase badlo
+    
     if not state.intro_done:
         state.intro_done = True
         state.phase = "technical"
@@ -189,3 +189,23 @@ def chat(request: ChatRequest):
         "reply": ai_reply,
         "state": state.model_dump()
     }
+
+@app.get("/report/{session_id}")
+def get_report(session_id: str):
+    redis_key = f"session:{session_id}"
+
+    stored_history = redis_client.get(redis_key)
+    if not stored_history:
+        raise HTTPException(status_code=404, detail="Session not found or expired.")
+
+    history = json.loads(stored_history)
+    state = get_state(session_id)
+
+    report = generate_report(
+        conversation_history=history,
+        correct_count=state.correct_count,
+        incorrect_count=state.incorrect_count,
+        total_questions=state.question_count
+    )
+
+    return report
