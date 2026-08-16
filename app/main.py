@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from app.services.groq_service import get_ai_response, GroqServiceError
 from app.services.vector_store import get_relevant_questions
 from app.core.config import redis_client
+from app.models.interview_state import InterviewState
 import json
 
 app = FastAPI()
@@ -108,6 +109,18 @@ Stay in interviewer mode throughout the conversation. Never break character.
 
 RAG_MARKER = "[RAG_CONTEXT]"
 
+def get_state(session_id: str) -> InterviewState:
+    key = f"session:{session_id}:state"
+    stored = redis_client.get(key)
+    if stored:
+        return InterviewState(**json.loads(stored))
+    return InterviewState()  # new session, use defaults
+
+
+def save_state(session_id: str, state: InterviewState):
+    key = f"session:{session_id}:state"
+    redis_client.set(key, state.model_dump_json(), ex=3600)
+
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
@@ -122,7 +135,9 @@ def chat(request: ChatRequest):
     else:
         history = [SYSTEM_PROMPT]
 
-    
+    # Fetch State 
+    state = get_state(request.session_id)
+
     history = [msg for msg in history if not msg.get("content", "").startswith(RAG_MARKER)]
     relevant_questions = get_relevant_questions(request.message, n_results=3)
     rag_context = {
@@ -130,6 +145,21 @@ def chat(request: ChatRequest):
         "content": f"{RAG_MARKER} " + " | ".join(relevant_questions)
     }
     history.append(rag_context)
+    # if greeting phase is end, start technical phase
+    if state.phase == "greeting" and state.question_count == 0:
+        state.phase = "technical"
+
+    # Increase Question Count
+    state.question_count += 1
+
+    # If reached max question limit, signal for wrap-up
+    if state.question_count >= state.max_questions and state.phase != "wrapup":
+        state.phase = "wrapup"
+        wrapup_instruction = {
+            "role": "system",
+            "content": "The interview has reached its question limit. Thank the candidate, tell them the interview has concluded, and do not ask any more questions."
+        }
+        history.append(wrapup_instruction)
 
     history.append({"role": "user", "content": request.message})
 
@@ -141,7 +171,11 @@ def chat(request: ChatRequest):
     history.append({"role": "assistant", "content": ai_reply})
     redis_client.set(redis_key, json.dumps(history), ex=3600)
 
+    # Save updated state 
+    save_state(request.session_id, state)
+
     return {
         "user_message": request.message,
-        "reply": ai_reply
+        "reply": ai_reply,
+        "state": state.model_dump()
     }
