@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from app.services.groq_service import get_ai_response, GroqServiceError
+from app.services.groq_service import get_ai_response, GroqServiceError, evaluate_answer
 from app.services.vector_store import get_relevant_questions
 from app.core.config import redis_client
 from app.models.interview_state import InterviewState
@@ -108,6 +108,7 @@ Stay in interviewer mode throughout the conversation. Never break character.
 }
 
 RAG_MARKER = "[RAG_CONTEXT]"
+GREETING_KEYWORDS = ["introduce yourself", "tell me about your background", "about yourself"]
 
 def get_state(session_id: str) -> InterviewState:
     key = f"session:{session_id}:state"
@@ -130,29 +131,39 @@ def chat(request: ChatRequest):
     redis_key = f"session:{request.session_id}"
 
     stored_history = redis_client.get(redis_key)
-    if stored_history:
-        history = json.loads(stored_history)
-    else:
-        history = [SYSTEM_PROMPT]
+    history = json.loads(stored_history) if stored_history else [SYSTEM_PROMPT]
 
-    # Fetch State 
     state = get_state(request.session_id)
 
     history = [msg for msg in history if not msg.get("content", "").startswith(RAG_MARKER)]
     relevant_questions = get_relevant_questions(request.message, n_results=3)
-    rag_context = {
-        "role": "system",
-        "content": f"{RAG_MARKER} " + " | ".join(relevant_questions)
-    }
+    rag_context = {"role": "system", "content": f"{RAG_MARKER} " + " | ".join(relevant_questions)}
     history.append(rag_context)
-    # if greeting phase is end, start technical phase
-    if state.phase == "greeting" and state.question_count == 0:
+
+    # Evaluation SIRF tab chalegi jab intro complete ho chuka ho AUR last question technical thi
+    if state.phase == "technical" and state.intro_done:
+        last_question = None
+        for msg in reversed(history):
+            if msg["role"] == "assistant":
+                last_question = msg["content"]
+                break
+
+        is_greeting_question = last_question and any(kw in last_question.lower() for kw in GREETING_KEYWORDS)
+
+        if last_question and not is_greeting_question:
+            evaluation = evaluate_answer(last_question, request.message)
+            if evaluation.get("is_correct") is True:
+                state.correct_count += 1
+            elif evaluation.get("is_correct") is False:
+                state.incorrect_count += 1
+
+    # Agar intro abhi tak nahi hua, YE message hi intro tha — ab mark karo aur phase badlo
+    if not state.intro_done:
+        state.intro_done = True
         state.phase = "technical"
 
-    # Increase Question Count
     state.question_count += 1
 
-    # If reached max question limit, signal for wrap-up
     if state.question_count >= state.max_questions and state.phase != "wrapup":
         state.phase = "wrapup"
         wrapup_instruction = {
@@ -171,7 +182,6 @@ def chat(request: ChatRequest):
     history.append({"role": "assistant", "content": ai_reply})
     redis_client.set(redis_key, json.dumps(history), ex=3600)
 
-    # Save updated state 
     save_state(request.session_id, state)
 
     return {
