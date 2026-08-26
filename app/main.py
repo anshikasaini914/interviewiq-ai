@@ -1,6 +1,7 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi.responses import Response
 from pydantic import BaseModel
-from app.services.groq_service import get_ai_response, GroqServiceError, evaluate_answer, generate_report
+from app.services.groq_service import get_ai_response, GroqServiceError, evaluate_answer, generate_report, transcribe_audio, text_to_speech
 from app.services.vector_store import get_relevant_questions
 from app.core.config import redis_client
 from app.models.interview_state import InterviewState
@@ -88,10 +89,11 @@ Never say: "Let me explain...", "Here's why...", "The answer is...", "This means
 ====================================================
 CONVERSATION STYLE
 ====================================================
-
 - Be concise: at most 3 sentences, under 60 words per response.
 - Do not ask multiple technical questions in one response.
 - Wait for the candidate after every question.
+- Your response must END immediately after asking the question. Do NOT add any filler text like "Your answer, please", "Waiting for your response", or repeat this phrase multiple times. Do NOT continue the conversation on the candidate's behalf.
+- Never generate more than ONE question-hint-followup cycle in a single response. Stop and wait for actual candidate input.
 
 ====================================================
 USING RAG
@@ -135,12 +137,36 @@ def chat(request: ChatRequest):
 
     state = get_state(request.session_id)
 
+    # --- Question limit check FIRST — before calling the LLM at all ---
+    if state.phase != "wrapup":
+        state.question_count += 1
+
+    if state.question_count >= state.max_questions and state.phase != "wrapup":
+        state.phase = "wrapup"
+
+        history.append({"role": "user", "content": request.message})
+        ai_reply = (
+            "Thank you for completing the interview. That concludes our session today — "
+            "you can now view your feedback report below."
+        )
+        history.append({"role": "assistant", "content": ai_reply})
+        redis_client.set(redis_key, json.dumps(history), ex=3600)
+        save_state(request.session_id, state)
+
+        return {
+            "user_message": request.message,
+            "reply": ai_reply,
+            "state": state.model_dump()
+        }
+
+    # --- Normal flow (only runs if interview is still active) ---
+
     history = [msg for msg in history if not msg.get("content", "").startswith(RAG_MARKER)]
     relevant_questions = get_relevant_questions(request.message, n_results=3)
     rag_context = {"role": "system", "content": f"{RAG_MARKER} " + " | ".join(relevant_questions)}
     history.append(rag_context)
 
-    
+    GREETING_KEYWORDS_LOCAL = GREETING_KEYWORDS
     if state.phase == "technical" and state.intro_done:
         last_question = None
         for msg in reversed(history):
@@ -148,7 +174,7 @@ def chat(request: ChatRequest):
                 last_question = msg["content"]
                 break
 
-        is_greeting_question = last_question and any(kw in last_question.lower() for kw in GREETING_KEYWORDS)
+        is_greeting_question = last_question and any(kw in last_question.lower() for kw in GREETING_KEYWORDS_LOCAL)
 
         if last_question and not is_greeting_question:
             evaluation = evaluate_answer(last_question, request.message)
@@ -157,20 +183,9 @@ def chat(request: ChatRequest):
             elif evaluation.get("is_correct") is False:
                 state.incorrect_count += 1
 
-    
     if not state.intro_done:
         state.intro_done = True
         state.phase = "technical"
-
-    state.question_count += 1
-
-    if state.question_count >= state.max_questions and state.phase != "wrapup":
-        state.phase = "wrapup"
-        wrapup_instruction = {
-            "role": "system",
-            "content": "The interview has reached its question limit. Thank the candidate, tell them the interview has concluded, and do not ask any more questions."
-        }
-        history.append(wrapup_instruction)
 
     history.append({"role": "user", "content": request.message})
 
@@ -209,3 +224,20 @@ def get_report(session_id: str):
     )
 
     return report
+
+@app.post("/transcribe")
+async def transcribe(audio_file: UploadFile = File(...)):
+    try:
+        audio_bytes = await audio_file.read()
+        audio_tuple = (audio_file.filename, audio_bytes, audio_file.content_type)
+        text = transcribe_audio(audio_tuple)
+        return {"text": text}
+    except GroqServiceError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.message)
+
+@app.post("/text-to-speech")
+def speech(text: str):
+    audio_bytes = text_to_speech(text)
+    if audio_bytes is None:
+        raise HTTPException(status_code=502, detail="Could not generate speech audio.")
+    return Response(content=audio_bytes, media_type="audio/mpeg")

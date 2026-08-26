@@ -8,3 +8,4 @@ requests
 redis
 sentence-transformers
 chromadb
+gtts

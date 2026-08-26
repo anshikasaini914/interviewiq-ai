@@ -1,4 +1,6 @@
 import json
+from gtts import gTTS
+import io
 from openai import OpenAI, APIStatusError
 from app.core.config import GROQ_API_KEY
 
@@ -16,7 +18,7 @@ class GroqServiceError(Exception):
 def get_ai_response(messages: list) -> str:
     try:
         response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="openai/gpt-oss-120b",
             messages=messages
         )
         return response.choices[0].message.content
@@ -34,7 +36,7 @@ def evaluate_answer(question: str, answer: str) -> dict:
     """Candidate ke answer ko evaluate karta hai, structured JSON return karta hai."""
     try:
         response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="openai/gpt-oss-120b",
             messages=[
                 {
                     "role": "system",
@@ -74,7 +76,7 @@ def generate_report(conversation_history: list, correct_count: int, incorrect_co
 
     try:
         response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="openai/gpt-oss-120b",
             messages=[
                 {
                     "role": "system",
@@ -105,3 +107,26 @@ Base topics on subject areas actually discussed (e.g., Python, SQL, Statistics, 
         "weak_topics": result.get("weak_topics", []),
         "summary": result.get("summary", "")
     }
+
+def transcribe_audio(audio_file) -> str:
+    """Audio file ko Groq Whisper se text mein convert karta hai."""
+    try:
+        transcription = client.audio.transcriptions.create(
+            file=audio_file,
+            model="whisper-large-v3"
+        )
+        return transcription.text
+    except Exception as e:
+        raise GroqServiceError(502, "Could not transcribe audio. Please try again or type your answer.")
+
+def text_to_speech(text: str) -> bytes:
+    """Text ko audio (MP3 bytes) mein convert karta hai."""
+    try:
+        tts = gTTS(text=text, lang='en')
+        audio_buffer = io.BytesIO()
+        tts.write_to_fp(audio_buffer)
+        audio_buffer.seek(0)
+        return audio_buffer.read()
+    except Exception:
+        return None
+
