@@ -15,13 +15,33 @@ class GroqServiceError(Exception):
         self.message = message
         super().__init__(message)
 
-def get_ai_response(messages: list) -> str:
+def get_ai_response(history: list) -> str:
     try:
         response = client.chat.completions.create(
             model="openai/gpt-oss-120b",
-            messages=messages
+            messages=history,
+            max_tokens=300,
+            temperature=0.2 
         )
-        return response.choices[0].message.content
+        content = response.choices[0].message.content
+
+        if not content or not content.strip():
+            retry_response = client.chat.completions.create(
+                model="openai/gpt-oss-120b",
+                messages=history + [
+                    {
+                        "role": "system",
+                        "content": "Your previous response was empty. Respond now with a short, direct interview question or acknowledgment in plain text — no internal reasoning, just the final reply."
+                    }
+                ],
+                max_tokens=300
+            )
+            content = retry_response.choices[0].message.content
+
+        if not content or not content.strip():
+            content = "Let's continue — could you elaborate a bit more on that?"
+
+        return content
 
     except APIStatusError as e:
         if e.status_code == 429:
@@ -108,16 +128,35 @@ Base topics on subject areas actually discussed (e.g., Python, SQL, Statistics, 
         "summary": result.get("summary", "")
     }
 
-def transcribe_audio(audio_file) -> str:
-    """Audio file ko Groq Whisper se text mein convert karta hai."""
+KNOWN_HALLUCINATION_PHRASES = [
+    "thank you for watching",
+    "thanks for watching",
+    "subscribe",
+    "дякую за перегляд",
+    "дякую",
+    "gracias por ver",
+    "please subscribe",
+    "like and subscribe",
+    "bye bye",
+]
+
+def transcribe_audio(audio_file):
     try:
         transcription = client.audio.transcriptions.create(
-            file=audio_file,
-            model="whisper-large-v3"
+            model="whisper-large-v3",
+            file=audio_file
         )
-        return transcription.text
+        text = transcription.text.strip()
+
+        # Hallucination guard 
+        lowered = text.lower()
+        if any(phrase in lowered for phrase in KNOWN_HALLUCINATION_PHRASES):
+            return ""
+
+        return text
+
     except Exception as e:
-        raise GroqServiceError(502, "Could not transcribe audio. Please try again or type your answer.")
+        raise GroqServiceError(502, f"Transcription failed: {str(e)}")
 
 def text_to_speech(text: str) -> bytes:
     """Text ko audio (MP3 bytes) mein convert karta hai."""
@@ -129,4 +168,29 @@ def text_to_speech(text: str) -> bytes:
         return audio_buffer.read()
     except Exception:
         return None
+
+def extract_skills_from_resume(resume_text: str) -> dict:
+    """Resume text se top Data Science-relevant skills extract karta hai."""
+    try:
+        response = client.chat.completions.create(
+            model="openai/gpt-oss-120b",
+            messages=[
+                {
+                    "role": "system",
+                    "content": """You are analyzing a candidate's resume for a Data Science interview. Extract the top 3-5 technical skills/technologies most relevant to Data Science (e.g., Python, SQL, Machine Learning, Statistics, Pandas, Deep Learning, NumPy, Data Visualization).
+
+Respond ONLY with a JSON object in this exact format:
+{"skills": ["skill1", "skill2", "skill3"]}"""
+                },
+                {
+                    "role": "user",
+                    "content": f"Resume text:\n{resume_text[:3000]}"
+                }
+            ],
+            response_format={"type": "json_object"}
+        )
+        return json.loads(response.choices[0].message.content)
+
+    except Exception:
+        return {"skills": []}
 

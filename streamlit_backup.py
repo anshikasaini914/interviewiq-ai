@@ -12,28 +12,10 @@ except ImportError:
 
 
 st.set_page_config(
-    page_title="InterviewIQ AI",
+    page_title="AI Data Science Interview",
     page_icon="🎙️",
     layout="wide"
 )
-
-st.markdown("""
-<style>
-    .block-container { padding-top: 2rem; padding-bottom: 2rem; }
-    [data-testid="stMetric"] {
-        background: rgba(255,255,255,0.04);
-        border: 1px solid rgba(128,128,128,0.22);
-        padding: 12px 14px;
-        border-radius: 12px;
-    }
-    .hackathon-card {
-        border: 1px solid rgba(128,128,128,0.22);
-        border-radius: 14px;
-        padding: 14px;
-        margin-bottom: 10px;
-    }
-</style>
-""", unsafe_allow_html=True)
 
 
 # ============================================================
@@ -130,9 +112,6 @@ if "evaluated_answers" not in st.session_state:
 
 if "overall_end_time" not in st.session_state:
     st.session_state.overall_end_time = None
-
-if "adaptive_note" not in st.session_state:
-    st.session_state.adaptive_note = None
 
 
 # ============================================================
@@ -303,27 +282,6 @@ def send_message(message):
         # ----------------------------------------------------
 
         state = data.get("state", {})
-
-        # Human-readable adaptive explanation for the hackathon UI.
-        if data.get("answer_evaluated") is True:
-            if data.get("same_question") is True:
-                st.session_state.adaptive_note = (
-                    "🧠 Adaptive Follow-up: Your previous answer needs more clarification, "
-                    "so the interviewer is staying on the current concept."
-                )
-            elif data.get("new_question") is True:
-                st.session_state.adaptive_note = (
-                    "🧠 Adaptive Interview: Your previous answer was evaluated, "
-                    "so the interviewer is moving to the next relevant concept."
-                )
-        elif data.get("ignored_as_noise") is True:
-            st.session_state.adaptive_note = (
-                "🎧 Filler/noise ignored: this response was not included in performance metrics."
-            )
-        elif data.get("new_question") is True:
-            st.session_state.adaptive_note = (
-                "🧠 Adaptive Interview: Selecting the next question from the ongoing context."
-            )
 
         backend_phase = state.get(
             "phase",
@@ -513,7 +471,6 @@ def reset_interview():
     st.session_state.answer_times = []
     st.session_state.evaluated_answers = 0
     st.session_state.overall_end_time = None
-    st.session_state.adaptive_note = None
 
     st.rerun()
 
@@ -524,52 +481,52 @@ def reset_interview():
 
 with st.sidebar:
 
-    st.title("🎯 InterviewIQ AI")
-    st.caption("🧠 RAG-powered • Adaptive • Voice-ready")
+    st.title("🎙️ Interview Settings")
 
-    st.divider()
+    st.subheader("Interview Mode")
 
-    st.subheader("🎙 Interview Mode")
     st.session_state.interview_mode = st.radio(
         "Choose mode",
-        ["🎙️ Voice Interview", "⌨️ Text Interview"],
+        [
+            "🎙️ Voice Interview",
+            "⌨️ Text Interview"
+        ],
         index=0,
         label_visibility="collapsed"
     )
 
     st.divider()
 
-    st.subheader("⚙️ Interview Configuration")
-    st.write("🎯 **Domain:** Data Science")
-    st.write("📚 **Question Bank:** RAG Knowledge Base")
-    st.write("🧠 **Difficulty:** Adaptive")
-    st.write("⏱️ **Session:** 20 minutes")
-    st.write("⏳ **Answer:** 90 sec + 10 sec buffer")
+    st.subheader("⏱️ Interview Settings")
 
-    if st.session_state.resume_skills:
-        st.divider()
-        st.subheader("📄 Resume Skills")
-        st.write(", ".join(st.session_state.resume_skills))
+    st.write(
+        "Overall time: **20 minutes**"
+    )
 
+    st.write(
+        "Time per question: **90 seconds**"
+    )
+   
     st.divider()
     st.caption("⏱️ Timer updates live every second")
 
-    if st.button("🔄 Reset Interview", use_container_width=True):
+    if st.button(
+        "🔄 Reset Interview",
+        use_container_width=True
+    ):
+
         reset_interview()
 
 
+# ============================================================
 # HEADER
 # ============================================================
 
-st.title("🎙️ InterviewIQ AI")
-st.caption("AI-Powered Adaptive Data Science Interview Simulator")
+st.title("🎙️ AI Data Science Interview")
 
-# Compact product badges for the hackathon demo.
-b1, b2, b3, b4 = st.columns(4)
-b1.info("🧠 RAG Question Bank")
-b2.info("🔄 Adaptive Interview")
-b3.info("🎙️ Voice + Text")
-b4.info("📊 AI Evaluation")
+st.caption(
+    "Practice your Data Science interview with an AI interviewer."
+)
 
 
 # ============================================================
@@ -683,9 +640,6 @@ def _render_timer():
     else:
         question_elapsed = 0
 
-    total_minutes = int(total_remaining // 60)
-    total_seconds = int(total_remaining % 60)
-
     # While the interviewer is still speaking, do NOT consume answer time.
     if (
         st.session_state.question_speaking_until is not None
@@ -785,13 +739,6 @@ if not st.session_state.interview_finished:
 
 
 # ============================================================
-# ADAPTIVE STATUS
-# ============================================================
-
-if st.session_state.adaptive_note and not st.session_state.interview_finished:
-    st.info(st.session_state.adaptive_note)
-
-# ============================================================
 # CHAT HISTORY
 # ============================================================
 
@@ -839,11 +786,7 @@ if st.session_state.interview_finished:
         m3.metric("Incorrect", incorrect)
 
         accuracy = (correct / total * 100) if total > 0 else 0
-        st.progress(min(int(accuracy), 100), text=f"Answer-based Performance: {accuracy:.0f}%")
-
-        st.markdown("### 🎯 Interview Readiness")
-        st.progress(min(int(accuracy), 100), text=f"Session Readiness Indicator: {accuracy:.0f}%")
-        st.caption("This is a session-level indicator based on evaluated answers; it is not a hiring prediction.")
+        st.progress(min(int(accuracy), 100), text=f"Average Performance: {accuracy:.0f}%")
 
         overall_seconds = report.get("overall_time_seconds", 0)
         avg_answer_seconds = report.get("average_hands_on_time_seconds", 0)
@@ -932,26 +875,6 @@ if st.session_state.interview_finished:
                     st.write(f"⚠️ {item}")
             else:
                 st.caption("None identified.")
-
-        st.divider()
-        st.markdown("### 🤖 AI Interview Coach")
-        coach_col1, coach_col2 = st.columns(2)
-        with coach_col1:
-            st.markdown("**💪 Strong Areas**")
-            if strong_topics:
-                for item in strong_topics[:4]:
-                    st.write(f"✅ {item}")
-            else:
-                st.write("Build consistency across the interview topics.")
-        with coach_col2:
-            st.markdown("**📚 Improve Next**")
-            if weak_topics:
-                for item in weak_topics[:4]:
-                    st.write(f"🎯 {item}")
-            else:
-                st.write("Keep practicing deeper explanations and timed answers.")
-
-        st.caption("Performance, timing and readiness are based only on evaluated interview answers. Filler/noise and repeat requests are excluded.")
 
         with st.expander("🔍 View complete report (raw JSON)"):
             st.json(report)

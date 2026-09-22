@@ -1,4 +1,7 @@
-pip freeze > requirements.txt
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+sentence-transformers
+chromadb
 fastapi
 uvicorn
 python-dotenv
@@ -6,6 +9,6 @@ openai
 streamlit
 requests
 redis
-sentence-transformers
-chromadb
 gtts
+PyPDF2
+matplotlib
