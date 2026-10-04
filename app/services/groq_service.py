@@ -170,17 +170,19 @@ def text_to_speech(text: str) -> bytes:
         return None
 
 def extract_skills_from_resume(resume_text: str) -> dict:
-    """Resume text se top Data Science-relevant skills extract karta hai."""
+    """Resume text se target role aur top skills dono extract karta hai."""
     try:
         response = client.chat.completions.create(
             model="openai/gpt-oss-120b",
             messages=[
                 {
                     "role": "system",
-                    "content": """You are analyzing a candidate's resume for a Data Science interview. Extract the top 3-5 technical skills/technologies most relevant to Data Science (e.g., Python, SQL, Machine Learning, Statistics, Pandas, Deep Learning, NumPy, Data Visualization).
+                    "content": """You are analyzing a candidate's resume to prepare for a mock interview. Identify the most likely job role/title this candidate is targeting (based on their experience, skills, and projects), and extract their top 3-5 skills relevant to that role.
 
 Respond ONLY with a JSON object in this exact format:
-{"skills": ["skill1", "skill2", "skill3"]}"""
+{"suggested_role": "Job Role Title", "skills": ["skill1", "skill2", "skill3"]}
+
+The suggested_role should be a concise, standard job title (e.g., "Backend Developer", "Data Analyst", "Product Manager", "DevOps Engineer") — not a sentence. If unclear, make your best guess from the overall resume content."""
                 },
                 {
                     "role": "user",
@@ -192,5 +194,4 @@ Respond ONLY with a JSON object in this exact format:
         return json.loads(response.choices[0].message.content)
 
     except Exception:
-        return {"skills": []}
-
+        return {"suggested_role": "", "skills": []}

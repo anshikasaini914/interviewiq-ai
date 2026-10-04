@@ -9,5 +9,4 @@ class InterviewState(BaseModel):
     incorrect_count: int = 0     
     consecutive_wrong: int = 0        
     greeting_exchange_count: int = 0
-   
-   
+    target_role: str = ""

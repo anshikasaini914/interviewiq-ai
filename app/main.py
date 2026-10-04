@@ -24,6 +24,7 @@ app = FastAPI()
 class ChatRequest(BaseModel):
     session_id: str
     message: str
+    target_role: str = ""
 
 
 class SessionMetrics(BaseModel):
@@ -31,10 +32,13 @@ class SessionMetrics(BaseModel):
     answer_times: list[float] = []
     evaluated_answers: int = 0
 
-SYSTEM_PROMPT = {
-    "role": "system",
-    "content": """
-You are an experienced Senior Data Science Interviewer conducting a realistic technical interview for a Data Scientist/Data Analyst role.
+def build_system_prompt(role: str) -> dict:
+    role_label = role.strip() if role and role.strip() else "the candidate's stated field"
+
+    return {
+        "role": "system",
+        "content": f"""
+You are an experienced Senior Technical Interviewer conducting a realistic interview for a {role_label} role.
 - NEVER simulate, write, or assume the candidate's answer.
 - NEVER write placeholder text like "Your answer, please" or continue the conversation on the candidate's behalf.
 - After asking ONE question, STOP completely and wait for the real candidate response. Do not generate any further dialogue turns.
@@ -53,8 +57,8 @@ PHASE 1 - Introduction
 - Ask the candidate to introduce themselves. Wait for their response.
 
 PHASE 2 - Technical Interview
-- Ask ONE technical question at a time. Wait for the candidate's answer.
-- Cover different areas gradually: Python, SQL, Statistics, Machine Learning, Pandas, NumPy, Data Visualization, Data Cleaning, Feature Engineering, Model Evaluation, Deep Learning (optional).
+- Ask ONE technical question at a time, relevant to a {role_label} role and the candidate's stated background/skills. Wait for the candidate's answer.
+- Use your own judgment of what topics, tools, and concepts a {role_label} candidate should be able to discuss, and cover different relevant areas gradually.
 - Avoid asking many consecutive questions from the same topic.
 
 PHASE 3 - Closing
@@ -67,7 +71,6 @@ EVALUATING EACH ANSWER — FOLLOW THIS DECISION ORDER
 
 STEP 1: Is the answer CORRECT and THOROUGH (explains the mechanism/reasoning, not just a label)?
 → Acknowledge briefly (1 sentence max) and move to a NEW question on a DIFFERENT topic.
-   Example: "Correct. Let's move to SQL."
 
 STEP 2: Is the answer CORRECT but SHALLOW (right direction, but vague or missing the mechanism)?
 → Acknowledge briefly, then ask ONE targeted follow-up question probing the missing detail.
@@ -81,14 +84,14 @@ STEP 3: Is the answer INCORRECT or PARTIALLY CORRECT?
 IF THE CANDIDATE ASKS FOR HELP DIRECTLY
 ====================================================
 
-- If they ask for a HINT: give ONE hint. Do not add a refusal line.
+- If they ask for a HINT: give only ONE hint per question not more than 1. Do not add a refusal line.
 - If they ask for the ANSWER: politely refuse — "We'll discuss that after the interview. For now, let's continue." — then repeat the current question.
 
 ====================================================
 STRICT PROHIBITIONS
 ====================================================
 
-Never: explain concepts, teach, give tutorials, reveal answers/definitions, suggest learning resources, mention internal evaluation/scoring/notes/performance tracking.
+Never: explain concepts, teach, give tutorials,thank after every answer, reveal answers/definitions, suggest learning resources, mention internal evaluation/scoring/notes/performance tracking.
 
 ====================================================
 CONVERSATION STYLE
@@ -103,7 +106,7 @@ CONVERSATION STYLE
 USING RAG
 ====================================================
 
-You may receive a system message starting with [RAG_CONTEXT] containing questions from a question bank. Use them only as inspiration — do NOT copy them verbatim.
+You may receive a system message starting with [RAG_CONTEXT] containing questions from a question bank. Use them only as inspiration if relevant to the {role_label} role — do NOT copy them verbatim, and ignore them entirely if they don't fit this role.
 
 ====================================================
 IMPORTANT
@@ -111,7 +114,8 @@ IMPORTANT
 
 Stay in interviewer mode throughout the conversation. Never break character.
 """
-}
+    }
+
 
 RAG_MARKER = "[RAG_CONTEXT]"
 GREETING_KEYWORDS = [
@@ -125,24 +129,21 @@ GREETING_KEYWORDS = [
     "your role",
 ]
 
+# Domain-neutral — ab ye kisi bhi role ke liye safe fallback hai,
+# sirf Data Science-specific nahi.
 FALLBACK_QUESTIONS = [
-    "What is the difference between supervised and unsupervised learning?",
-    "How would you handle missing values in a pandas DataFrame?",
-    "What is overfitting, and how can you prevent it?",
-    "Explain the difference between a list and a tuple in Python.",
-    "What does an SQL INNER JOIN do?",
-    "What is the purpose of cross-validation in model evaluation?",
-    "What does the pandas groupby() function do?",
-    "How does a confusion matrix help evaluate a classification model?",
+    "Can you walk me through a challenging project you've worked on relevant to this role?",
+    "What tools or technologies do you use most often in your work, and why?",
+    "Can you describe a time you solved a difficult technical problem?",
+    "What would you say is your strongest skill relevant to this role, and how have you applied it?",
+    "How do you approach learning a new tool or technology quickly?",
+    "Can you describe how you'd approach debugging an issue you've never seen before?",
 ]
 
 
 # ------------------------------------------------------------
 # Candidate-response guard
 # ------------------------------------------------------------
-# Short filler/noise responses must NOT be sent to the evaluator.
-# Otherwise words such as "no", "hey", "thank you", or audio noise
-# can be treated as an incorrect answer and trigger a hint.
 NON_ANSWER_PHRASES = {
     "no", "nope", "nah", "hey", "hi", "hii", "hello",
     "ok", "okay", "yes", "yeah", "yep", "haan", "haan ji",
@@ -180,7 +181,6 @@ def is_non_answer(text: str) -> bool:
 
     words = normalized.replace(",", "").replace(".", "").split()
 
-    # Very short speech-to-text output made only of filler/noise words.
     if len(words) <= 8 and words and all(word in FILLER_WORDS for word in words):
         return True
 
@@ -220,15 +220,16 @@ def chat(request: ChatRequest):
     redis_key = f"session:{request.session_id}"
 
     stored_history = redis_client.get(redis_key)
-    history = json.loads(stored_history) if stored_history else [SYSTEM_PROMPT]
-
     state = get_state(request.session_id)
+
+    if not stored_history:
+        if not state.target_role:
+            state.target_role = request.target_role
+        history = [build_system_prompt(state.target_role)]
+    else:
+        history = json.loads(stored_history)
     candidate_text = normalize_response(request.message)
 
-    # --------------------------------------------------------
-    # SAFETY GUARD: do not evaluate obvious filler/noise.
-    # This keeps the interviewer on the SAME question.
-    # --------------------------------------------------------
     if state.intro_done:
         last_question = None
         for msg in reversed(history):
@@ -279,11 +280,6 @@ def chat(request: ChatRequest):
                     "answer_evaluated": False,
                 }
 
-    # --------------------------------------------------------
-    # Evaluate the real candidate answer BEFORE question limit.
-    # The previous version checked the limit first, which could
-    # finish the interview before the final answer was evaluated.
-    # --------------------------------------------------------
     answer_was_evaluated = False
     answer_was_correct = None
 
@@ -311,16 +307,9 @@ def chat(request: ChatRequest):
                 state.incorrect_count += 1
                 state.consecutive_wrong += 1
 
-    # --------------------------------------------------------
-    # Count this candidate's real interview turn.
-    # --------------------------------------------------------
     if state.phase != "wrapup":
         state.question_count += 1
 
-    # --------------------------------------------------------
-    # Interview limit reached: finish only AFTER processing the
-    # final candidate answer.
-    # --------------------------------------------------------
     if state.question_count >= state.max_questions and state.phase != "wrapup":
         state.phase = "wrapup"
 
@@ -345,10 +334,6 @@ def chat(request: ChatRequest):
             "answer_evaluated": answer_was_evaluated,
         }
 
-    # --------------------------------------------------------
-    # If the candidate is repeatedly incorrect, move on without
-    # letting the LLM get stuck in the same question.
-    # --------------------------------------------------------
     if state.consecutive_wrong >= 2:
         state.consecutive_wrong = 0
 
@@ -373,9 +358,6 @@ def chat(request: ChatRequest):
             "answer_evaluated": answer_was_evaluated,
         }
 
-    # --------------------------------------------------------
-    # Introduction handling
-    # --------------------------------------------------------
     if not state.intro_done:
         state.greeting_exchange_count += 1
 
@@ -388,9 +370,6 @@ def chat(request: ChatRequest):
             state.intro_done = True
             state.phase = "technical"
 
-    # --------------------------------------------------------
-    # Normal LLM interview flow
-    # --------------------------------------------------------
     history = [
         msg for msg in history
         if not msg.get("content", "").startswith(RAG_MARKER)
@@ -422,8 +401,6 @@ def chat(request: ChatRequest):
     save_chat_history(request.session_id, history)
     save_state(request.session_id, state)
 
-    # A false evaluation means the interviewer should remain on the
-    # current question (the LLM prompt handles the one-hint rule).
     same_question = answer_was_evaluated and answer_was_correct is False
 
     return {
@@ -440,11 +417,6 @@ def chat(request: ChatRequest):
 
 @app.post("/metrics/{session_id}")
 def save_metrics(session_id: str, metrics: SessionMetrics):
-    """Store interview timing metrics used by the final report.
-
-    These metrics are supplied by the UI clock, while answer counts and
-    correctness remain backend-derived from evaluated answers only.
-    """
     key = f"session:{session_id}:metrics"
     redis_client.set(key, metrics.model_dump_json(), ex=3600)
     return {"success": True}
@@ -469,8 +441,6 @@ def get_report(session_id: str):
         "evaluated_answers": state.correct_count + state.incorrect_count,
     }
 
-    # Performance is strictly answer-based: only backend-evaluated answers
-    # contribute. Correct = 100, incorrect/partial = 0 for this summary.
     evaluated_answers = state.correct_count + state.incorrect_count
     performance = (
         state.correct_count / evaluated_answers * 100
@@ -510,7 +480,10 @@ async def extract_resume_skills(resume_file: UploadFile = File(...)):
             raise HTTPException(status_code=400, detail="Could not extract text from PDF.")
 
         result = extract_skills_from_resume(resume_text)
-        return {"skills": result.get("skills", [])}
+        return {
+            "suggested_role": result.get("suggested_role", ""),
+            "skills": result.get("skills", [])
+        }
 
     except HTTPException:
         raise

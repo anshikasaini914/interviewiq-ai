@@ -19,18 +19,50 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-    .block-container { padding-top: 2rem; padding-bottom: 2rem; }
-    [data-testid="stMetric"] {
-        background: rgba(255,255,255,0.04);
-        border: 1px solid rgba(128,128,128,0.22);
-        padding: 12px 14px;
+    /* Centered, narrow column — ChatGPT/Claude style */
+    .block-container {
+        max-width: 760px;
+        margin: 0 auto;
+        padding-top: 2rem;
+        padding-bottom: 6rem;
+    }
+
+    /* Minimal header */
+    h1 {
+        font-size: 1.6rem !important;
+        font-weight: 600 !important;
+        margin-bottom: 0.2rem !important;
+    }
+
+    /* Chat bubbles — soft, rounded, low visual weight */
+    [data-testid="stChatMessage"] {
+        background: transparent;
+        border: none;
+        padding: 0.4rem 0;
+    }
+    [data-testid="stChatMessageContent"] {
+        background: rgba(130,130,150,0.08);
+        border-radius: 14px;
+        padding: 10px 14px;
+    }
+
+    /* Slim timer status line */
+    .status-line {
+        font-size: 0.85rem;
+        color: rgba(200,200,210,0.75);
+        padding: 4px 2px 10px 2px;
+        border-bottom: 1px solid rgba(128,128,128,0.15);
+        margin-bottom: 0.6rem;
+    }
+
+    /* Reduce default widget clutter */
+    [data-testid="stExpander"] {
         border-radius: 12px;
     }
-    .hackathon-card {
-        border: 1px solid rgba(128,128,128,0.22);
-        border-radius: 14px;
-        padding: 14px;
-        margin-bottom: 10px;
+
+    /* Smaller, quieter captions */
+    .stCaption, [data-testid="stCaptionContainer"] {
+        opacity: 0.65;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -51,11 +83,11 @@ RESUME_SKILLS_URL = "http://127.0.0.1:8000/extract-resume-skills"
 # TIMER SETTINGS
 # ============================================================
 
-OVERALL_TIME = 20 * 60       # 20 minutes
-ANSWER_TIME = 90              # Candidate gets 90 seconds to answer
-TECHNICAL_BUFFER = 10         # Extra 10 seconds for processing/technical delay
+OVERALL_TIME = 20 * 60
+ANSWER_TIME = 90
+TECHNICAL_BUFFER = 10
 QUESTION_TIME = ANSWER_TIME + TECHNICAL_BUFFER
-LOW_TIME_BUFFER = 120         # 2 min — warning zone before overall time runs out
+LOW_TIME_BUFFER = 120
 
 
 # ============================================================
@@ -113,6 +145,12 @@ if "resume_skills" not in st.session_state:
 if "resume_processed" not in st.session_state:
     st.session_state.resume_processed = False
 
+if "suggested_role" not in st.session_state:
+    st.session_state.suggested_role = ""
+
+if "confirmed_role" not in st.session_state:
+    st.session_state.confirmed_role = ""
+
 if "intro_sent" not in st.session_state:
     st.session_state.intro_sent = False
 
@@ -140,14 +178,11 @@ if "adaptive_note" not in st.session_state:
 # ============================================================
 
 def start_interview_timer():
-    # Overall interview clock starts once the interview screen is active.
     if st.session_state.interview_start_time is None:
         st.session_state.interview_start_time = time.time()
 
 
 def start_question_timer(delay=0):
-    # IMPORTANT: answer time starts AFTER the interviewer has finished
-    # delivering the question. For voice mode, delay is the TTS duration.
     st.session_state.question_start_time = time.time() + max(0, delay)
     st.session_state.question_number += 1
     st.session_state.question_speaking_until = (
@@ -165,41 +200,29 @@ def mark_question_pending():
 # ============================================================
 
 def load_report():
-
     try:
-
         response = requests.get(
             f"{REPORT_URL}/{st.session_state.session_id}",
             timeout=60
         )
-
         if response.status_code == 200:
-
             st.session_state.report = response.json()
             st.session_state.report_error = None
-
             return True
-
         else:
-
             st.session_state.report_error = (
                 f"Report API returned {response.status_code}: "
                 f"{response.text}"
             )
-
             return False
-
     except requests.exceptions.RequestException as e:
-
         st.session_state.report_error = (
             f"Could not connect to report API: {e}"
         )
-
         return False
 
 
 def get_audio_duration(audio_bytes):
-    """Return MP3 duration in seconds when mutagen is available."""
     if not audio_bytes or MP3 is None:
         return 0
     try:
@@ -237,7 +260,7 @@ def save_session_metrics():
 # SEND MESSAGE
 # ============================================================
 
-def send_message(message):
+def send_message(message, target_role=""):
 
     if not message or not message.strip():
         return None
@@ -248,24 +271,21 @@ def send_message(message):
             BACKEND_URL,
             json={
                 "session_id": st.session_state.session_id,
-                "message": message
+                "message": message,
+                "target_role": target_role
             },
             timeout=60
         )
 
         if response.status_code != 200:
-
             st.error(
                 f"Backend error: {response.status_code}\n\n"
                 f"{response.text}"
             )
-
             return None
 
         data = response.json()
 
-        # Record hands-on answer time ONLY for a real evaluated answer.
-        # Noise, greetings, repeat requests, and ignored speech do not count.
         if data.get("answer_evaluated") is True:
             start = st.session_state.question_start_time
             if start is not None:
@@ -274,85 +294,38 @@ def send_message(message):
                 st.session_state.answer_times.append(elapsed)
             st.session_state.evaluated_answers += 1
 
-        # ----------------------------------------------------
-        # SAVE USER MESSAGE
-        # ----------------------------------------------------
-
         st.session_state.messages.append(
-            {
-                "role": "user",
-                "content": message
-            }
+            {"role": "user", "content": message}
         )
-
-        # ----------------------------------------------------
-        # SAVE AI RESPONSE
-        # ----------------------------------------------------
 
         ai_reply = data.get("reply", "")
 
         st.session_state.messages.append(
-            {
-                "role": "assistant",
-                "content": ai_reply
-            }
+            {"role": "assistant", "content": ai_reply}
         )
-
-        # ----------------------------------------------------
-        # READ BACKEND STATE
-        # ----------------------------------------------------
 
         state = data.get("state", {})
 
-        # Human-readable adaptive explanation for the hackathon UI.
         if data.get("answer_evaluated") is True:
             if data.get("same_question") is True:
-                st.session_state.adaptive_note = (
-                    "🧠 Adaptive Follow-up: Your previous answer needs more clarification, "
-                    "so the interviewer is staying on the current concept."
-                )
+                st.session_state.adaptive_note = "Let's clarify that a bit more."
             elif data.get("new_question") is True:
-                st.session_state.adaptive_note = (
-                    "🧠 Adaptive Interview: Your previous answer was evaluated, "
-                    "so the interviewer is moving to the next relevant concept."
-                )
+                st.session_state.adaptive_note = None
         elif data.get("ignored_as_noise") is True:
-            st.session_state.adaptive_note = (
-                "🎧 Filler/noise ignored: this response was not included in performance metrics."
-            )
+            st.session_state.adaptive_note = "That response wasn't counted — please answer the question."
         elif data.get("new_question") is True:
-            st.session_state.adaptive_note = (
-                "🧠 Adaptive Interview: Selecting the next question from the ongoing context."
-            )
+            st.session_state.adaptive_note = None
 
-        backend_phase = state.get(
-            "phase",
-            ""
-        )
-
+        backend_phase = state.get("phase", "")
         st.session_state.interview_phase = backend_phase
 
-        # ====================================================
-        # IMPORTANT FIX
-        # ====================================================
+        backend_finished = (backend_phase.lower() == "wrapup")
 
-        backend_finished = (
-            backend_phase.lower() == "wrapup"
-        )
-
-        completion_message = (
-            "Thank you for completing the interview"
-        )
-
-        reply_finished = (
-            completion_message.lower()
-            in ai_reply.lower()
-        )
+        completion_message = "Thank you for completing the interview"
+        reply_finished = (completion_message.lower() in ai_reply.lower())
 
         if backend_finished or reply_finished:
-
             st.session_state.interview_finished = True
-
             st.session_state.overall_end_time = time.time()
             st.session_state.question_start_time = None
             st.session_state.question_speaking_until = None
@@ -362,34 +335,16 @@ def send_message(message):
 
             return ai_reply
 
-        # ----------------------------------------------------
-        # TIMER CONTROL
-        # Reset the question timer ONLY when the backend says a
-        # NEW question was generated.
-        #
-        # This is important:
-        # - "no", "hey", "thank you" -> same question -> no reset
-        # - wrong answer + hint -> same question -> no reset
-        # - repeat request -> same question -> no reset
-        # - actual progression -> new question -> reset
-        # ----------------------------------------------------
-
         if not st.session_state.intro_sent:
             st.session_state.intro_sent = True
         elif data.get("new_question") is True:
-            # Do NOT start the answer timer here. The interviewer may still
-            # be speaking through TTS. The timer is started after TTS ends.
             mark_question_pending()
 
         save_session_metrics()
         return ai_reply
 
     except requests.exceptions.RequestException as e:
-
-        st.error(
-            f"Could not connect to backend:\n{e}"
-        )
-
+        st.error(f"Could not connect to backend:\n{e}")
         return None
 
 
@@ -398,45 +353,26 @@ def send_message(message):
 # ============================================================
 
 def transcribe_audio(audio_value):
-
     try:
-
         audio_bytes = audio_value.getvalue()
 
         files = {
-            "audio_file": (
-                "recording.wav",
-                audio_bytes,
-                "audio/wav"
-            )
+            "audio_file": ("recording.wav", audio_bytes, "audio/wav")
         }
 
-        response = requests.post(
-            TRANSCRIBE_URL,
-            files=files,
-            timeout=60
-        )
+        response = requests.post(TRANSCRIBE_URL, files=files, timeout=60)
 
         if response.status_code != 200:
-
             st.error(
-                f"Transcription error: "
-                f"{response.status_code}\n\n"
-                f"{response.text}"
+                f"Transcription error: {response.status_code}\n\n{response.text}"
             )
-
             return None
 
         data = response.json()
-
         return data.get("text", "")
 
     except requests.exceptions.RequestException as e:
-
-        st.error(
-            f"Could not transcribe audio:\n{e}"
-        )
-
+        st.error(f"Could not transcribe audio:\n{e}")
         return None
 
 
@@ -445,31 +381,13 @@ def transcribe_audio(audio_value):
 # ============================================================
 
 def generate_speech(text):
-
     try:
-
-        response = requests.post(
-            TTS_URL,
-            params={
-                "text": text
-            },
-            timeout=60
-        )
-
+        response = requests.post(TTS_URL, params={"text": text}, timeout=60)
         if response.status_code == 200:
-
             return response.content
-
-        st.warning(
-            "Could not generate AI voice."
-        )
-
+        st.warning("Could not generate AI voice.")
     except requests.exceptions.RequestException as e:
-
-        st.warning(
-            f"TTS error: {e}"
-        )
-
+        st.warning(f"TTS error: {e}")
     return None
 
 
@@ -478,35 +396,24 @@ def generate_speech(text):
 # ============================================================
 
 def reset_interview():
-
-    st.session_state.session_id = str(
-        uuid.uuid4()
-    )
-
+    st.session_state.session_id = str(uuid.uuid4())
     st.session_state.messages = []
-
     st.session_state.interview_phase = "intro"
-
     st.session_state.audio_key += 1
     st.session_state.text_key += 1
-
     st.session_state.last_audio = None
-
     st.session_state.transcript = ""
-
     st.session_state.is_processing = False
-
     st.session_state.interview_start_time = None
     st.session_state.question_start_time = None
     st.session_state.question_number = 0
-
     st.session_state.interview_finished = False
-
     st.session_state.report = None
     st.session_state.report_error = None
-
     st.session_state.resume_skills = []
     st.session_state.resume_processed = False
+    st.session_state.suggested_role = ""
+    st.session_state.confirmed_role = ""
     st.session_state.intro_sent = False
     st.session_state.new_question_pending = False
     st.session_state.question_speaking_until = None
@@ -519,76 +426,54 @@ def reset_interview():
 
 
 # ============================================================
-# SIDEBAR
+# SIDEBAR — kept minimal, only essentials
 # ============================================================
 
 with st.sidebar:
 
-    st.title("🎯 InterviewIQ AI")
-    st.caption("🧠 RAG-powered • Adaptive • Voice-ready")
+    st.markdown("**InterviewIQ**")
 
-    st.divider()
-
-    st.subheader("🎙 Interview Mode")
     st.session_state.interview_mode = st.radio(
-        "Choose mode",
+        "Mode",
         ["🎙️ Voice Interview", "⌨️ Text Interview"],
         index=0,
         label_visibility="collapsed"
     )
 
-    st.divider()
-
-    st.subheader("⚙️ Interview Configuration")
-    st.write("🎯 **Domain:** Data Science")
-    st.write("📚 **Question Bank:** RAG Knowledge Base")
-    st.write("🧠 **Difficulty:** Adaptive")
-    st.write("⏱️ **Session:** 20 minutes")
-    st.write("⏳ **Answer:** 90 sec + 10 sec buffer")
+    if st.session_state.confirmed_role:
+        st.caption(f"Role: {st.session_state.confirmed_role}")
 
     if st.session_state.resume_skills:
-        st.divider()
-        st.subheader("📄 Resume Skills")
-        st.write(", ".join(st.session_state.resume_skills))
+        st.caption("Skills: " + ", ".join(st.session_state.resume_skills))
 
-    st.divider()
-    st.caption("⏱️ Timer updates live every second")
-
-    if st.button("🔄 Reset Interview", use_container_width=True):
-        reset_interview()
-
-
-# HEADER
-# ============================================================
-
-st.title("🎙️ InterviewIQ AI")
-st.caption("AI-Powered Adaptive Data Science Interview Simulator")
-
-# Compact product badges for the hackathon demo.
-b1, b2, b3, b4 = st.columns(4)
-b1.info("🧠 RAG Question Bank")
-b2.info("🔄 Adaptive Interview")
-b3.info("🎙️ Voice + Text")
-b4.info("📊 AI Evaluation")
+    st.button("🔄 Reset", use_container_width=True, on_click=reset_interview)
 
 
 # ============================================================
-# RESUME UPLOAD (sirf interview shuru hone se pehle)
+# HEADER — minimal
+# ============================================================
+
+st.title("InterviewIQ")
+
+
+# ============================================================
+# RESUME UPLOAD + ROLE SELECTION (sirf interview shuru hone se pehle)
 # ============================================================
 
 if len(st.session_state.messages) == 0 and not st.session_state.interview_finished:
 
-    with st.expander("📄 Upload your resume (optional) — questions will adapt to your skills", expanded=True):
+    with st.expander("Upload resume (optional)", expanded=True):
 
         resume_file = st.file_uploader(
-            "Upload PDF resume",
+            "PDF resume",
             type=["pdf"],
-            key="resume_uploader"
+            key="resume_uploader",
+            label_visibility="collapsed"
         )
 
         if resume_file is not None and not st.session_state.resume_processed:
 
-            with st.spinner("📄 Analyzing your resume..."):
+            with st.spinner("Analyzing resume..."):
 
                 try:
                     files = {
@@ -598,23 +483,28 @@ if len(st.session_state.messages) == 0 and not st.session_state.interview_finish
                     response = requests.post(RESUME_SKILLS_URL, files=files, timeout=60)
 
                     if response.status_code == 200:
-                        skills = response.json().get("skills", [])
+                        data = response.json()
+                        skills = data.get("skills", [])
+                        st.session_state.suggested_role = data.get("suggested_role", "")
 
                         if skills:
                             st.session_state.resume_skills = skills
-                            st.success(f"Detected skills: {', '.join(skills)}")
-                        else:
-                            st.warning("Couldn't detect specific skills — proceeding with general questions.")
-                    else:
-                        st.warning("Could not analyze resume — proceeding with general questions.")
 
                 except requests.exceptions.RequestException:
-                    st.warning("Could not analyze resume — proceeding with general questions.")
+                    pass
 
             st.session_state.resume_processed = True
 
-        if st.button("🚀 Start Interview", type="primary", use_container_width=True):
+        role_input = st.text_input(
+            "Target role",
+            value=st.session_state.suggested_role,
+            placeholder="e.g. Backend Developer, Data Analyst, Product Manager",
+        )
 
+        if st.button("Start Interview", type="primary", use_container_width=True):
+
+            final_role = role_input.strip()
+            st.session_state.confirmed_role = final_role
             skills = st.session_state.resume_skills
 
             if skills:
@@ -625,24 +515,22 @@ if len(st.session_state.messages) == 0 and not st.session_state.interview_finish
             else:
                 opening_message = "Hi, I'm ready to begin the interview."
 
-            with st.spinner("🤖 Interviewer is preparing..."):
-                ai_reply = send_message(opening_message)
+            if final_role:
+                opening_message += f" I'm targeting a {final_role} role."
 
-            # The first interviewer question is also a real question.
-            # Generate/play it, then START Q1 timer only after speech ends.
+            with st.spinner("Preparing..."):
+                ai_reply = send_message(opening_message, target_role=final_role)
+
             if ai_reply and st.session_state.interview_mode == "🎙️ Voice Interview":
-                with st.spinner("🔊 Interviewer is speaking..."):
+                with st.spinner("..."):
                     audio = generate_speech(ai_reply)
                 if audio:
                     st.session_state.last_audio = audio
                     st.session_state.new_question_pending = True
-                    # Reserve the question number now, but delay the answer clock
-                    # until the TTS question has finished playing.
                     duration = get_audio_duration(audio)
                     start_question_timer(delay=duration)
 
             elif ai_reply:
-                # In text mode the question is already displayed, so start immediately.
                 start_question_timer()
 
             st.rerun()
@@ -651,18 +539,17 @@ if len(st.session_state.messages) == 0 and not st.session_state.interview_finish
 
 
 # ============================================================
-# START TIMER (only reaches here once interview has begun)
+# START TIMER
 # ============================================================
 
 start_interview_timer()
 
 
 # ============================================================
-# TIMER DISPLAY
+# TIMER — slim single-line status bar (not metric cards)
 # ============================================================
 
 def _render_timer():
-    """Live timer fragment — reruns once per second."""
     if st.session_state.interview_finished:
         return
 
@@ -673,138 +560,66 @@ def _render_timer():
         if st.session_state.interview_start_time is not None
         else 0
     )
-
     total_remaining = max(0, OVERALL_TIME - total_elapsed)
+    total_minutes = int(total_remaining // 60)
+    total_seconds = int(total_remaining % 60)
 
     if st.session_state.question_start_time is not None:
-        question_elapsed = (
-            current_time - st.session_state.question_start_time
-        )
+        question_elapsed = (current_time - st.session_state.question_start_time)
     else:
         question_elapsed = 0
 
-    total_minutes = int(total_remaining // 60)
-    total_seconds = int(total_remaining % 60)
-
-    # While the interviewer is still speaking, do NOT consume answer time.
-    if (
+    speaking = (
         st.session_state.question_speaking_until is not None
         and current_time < st.session_state.question_speaking_until
-    ):
-        speaking_remaining = max(0, st.session_state.question_speaking_until - current_time)
-        q_minutes = int(speaking_remaining // 60)
-        q_seconds = int(speaking_remaining % 60)
+    )
 
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("⏱️ Interview Time", f"{total_minutes:02d}:{total_seconds:02d}")
-        with col2:
-            st.metric("🎙️ Interviewer Speaking", f"{q_minutes:02d}:{q_seconds:02d}")
-        with col3:
-            st.metric("❓ Question", max(st.session_state.question_number, 1))
-        return
+    if speaking:
+        label = "🎙️ speaking..."
+    elif question_elapsed <= ANSWER_TIME:
+        remaining = max(0, ANSWER_TIME - question_elapsed)
+        label = f"⏳ {int(remaining // 60):02d}:{int(remaining % 60):02d} to answer"
+    else:
+        buffer_remaining = max(0, QUESTION_TIME - question_elapsed)
+        label = f"⚙️ {int(buffer_remaining)}s buffer"
 
-    if st.session_state.question_speaking_until is not None:
+    if st.session_state.question_speaking_until is not None and not speaking:
         st.session_state.question_speaking_until = None
 
-    # First 90 sec = actual answer time.
-    if question_elapsed is None:
-        answer_remaining = ANSWER_TIME
-        buffer_remaining = TECHNICAL_BUFFER
-    else:
-        answer_remaining = max(0, ANSWER_TIME - question_elapsed)
-        buffer_elapsed = max(0, question_elapsed - ANSWER_TIME)
-        buffer_remaining = max(0, TECHNICAL_BUFFER - buffer_elapsed)
-
-    total_minutes = int(total_remaining // 60)
-    total_seconds = int(total_remaining % 60)
-
-    if question_elapsed is None:
-        q_minutes = speaking_remaining // 60
-        q_seconds = speaking_remaining % 60
-        question_label = "🎙️ Interviewer Speaking"
-        question_value = f"{q_minutes:02d}:{q_seconds:02d}"
-    elif question_elapsed <= ANSWER_TIME:
-        q_minutes = int(answer_remaining // 60)
-        q_seconds = int(answer_remaining % 60)
-        question_label = "⏳ Answer Time"
-        question_value = f"{q_minutes:02d}:{q_seconds:02d}"
-    else:
-        q_minutes = int(buffer_remaining // 60)
-        q_seconds = int(buffer_remaining % 60)
-        question_label = "⚙️ Processing Buffer"
-        question_value = f"{q_minutes:02d}:{q_seconds:02d}"
-
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        st.metric(
-            "⏱️ Interview Time",
-            f"{total_minutes:02d}:{total_seconds:02d}"
-        )
-
-    with col2:
-        st.metric(
-            question_label,
-            question_value
-        )
-
-    with col3:
-        st.metric(
-            "❓ Question",
-            max(st.session_state.question_number, 1)
-        )
-
-    if question_elapsed is not None and question_elapsed > ANSWER_TIME and buffer_remaining > 0:
-        st.warning(
-            "⚙️ Your 90-second answer time is over. "
-            f"You have {int(buffer_remaining)} seconds of technical buffer."
-        )
-    elif question_elapsed is not None and question_elapsed > QUESTION_TIME:
-        st.error(
-            "⏰ Question time is over. Submit your current response "
-            "or wait for the interviewer to continue."
-        )
+    st.markdown(
+        f"""<div class="status-line">
+        ⏱️ {total_minutes:02d}:{total_seconds:02d} left &nbsp;·&nbsp;
+        Q{max(st.session_state.question_number, 1)} &nbsp;·&nbsp;
+        {label}
+        </div>""",
+        unsafe_allow_html=True
+    )
 
     if total_remaining <= LOW_TIME_BUFFER and total_remaining > 0:
-        st.warning(
-            f"⚠️ Less than {LOW_TIME_BUFFER // 60} minutes remaining — "
-            "wrap up soon!"
-        )
+        st.caption("⚠️ Less than 2 minutes remaining — wrap up soon.")
 
 
 if not st.session_state.interview_finished:
-    # Streamlit fragments rerun this section independently every second,
-    # so the timer changes without requiring the user to click/submit.
     fragment = getattr(st, "fragment", None)
-
     if fragment is not None:
         _render_timer = fragment(run_every=1)(_render_timer)
-
     _render_timer()
 
 
 # ============================================================
-# ADAPTIVE STATUS
+# ADAPTIVE STATUS — quiet caption, not a big info box
 # ============================================================
 
 if st.session_state.adaptive_note and not st.session_state.interview_finished:
-    st.info(st.session_state.adaptive_note)
+    st.caption(st.session_state.adaptive_note)
 
 # ============================================================
 # CHAT HISTORY
 # ============================================================
 
-st.divider()
-
 for message in st.session_state.messages:
-
-    if message["role"] == "user":
-        with st.chat_message("user"):
-            st.write(message["content"])
-    else:
-        with st.chat_message("assistant"):
-            st.write(message["content"])
+    with st.chat_message(message["role"]):
+        st.write(message["content"])
 
 
 # ============================================================
@@ -814,11 +629,11 @@ for message in st.session_state.messages:
 if st.session_state.interview_finished:
 
     st.divider()
-    st.success("🎉 Interview completed!")
-    st.subheader("📊 Final Interview Report")
+    st.success("Interview completed")
+    st.subheader("Your Report")
 
     if st.session_state.report is None:
-        with st.spinner("Generating your final feedback report..."):
+        with st.spinner("Generating report..."):
             load_report()
 
     if st.session_state.report is not None:
@@ -829,21 +644,13 @@ if st.session_state.interview_finished:
         incorrect = report.get("incorrect_count", 0)
         total = report.get("total_questions", correct + incorrect)
 
-        # ------------------------------------------------
-        # TOP METRICS
-        # ------------------------------------------------
-
         m1, m2, m3 = st.columns(3)
-        m1.metric("Total Questions", total)
+        m1.metric("Questions", total)
         m2.metric("Correct", correct)
         m3.metric("Incorrect", incorrect)
 
         accuracy = (correct / total * 100) if total > 0 else 0
-        st.progress(min(int(accuracy), 100), text=f"Answer-based Performance: {accuracy:.0f}%")
-
-        st.markdown("### 🎯 Interview Readiness")
-        st.progress(min(int(accuracy), 100), text=f"Session Readiness Indicator: {accuracy:.0f}%")
-        st.caption("This is a session-level indicator based on evaluated answers; it is not a hiring prediction.")
+        st.progress(min(int(accuracy), 100), text=f"Performance: {accuracy:.0f}%")
 
         overall_seconds = report.get("overall_time_seconds", 0)
         avg_answer_seconds = report.get("average_hands_on_time_seconds", 0)
@@ -854,17 +661,11 @@ if st.session_state.interview_finished:
             return f"{seconds // 60:02d}:{seconds % 60:02d}"
 
         tm1, tm2, tm3 = st.columns(3)
-        tm1.metric("Total Interview Time", fmt_duration(overall_seconds))
-        tm2.metric("Avg. Hands-on Answer Time", fmt_duration(avg_answer_seconds))
-        tm3.metric("Evaluated Answers", evaluated)
-
-        st.caption("Performance and timing metrics are calculated only from actual evaluated question answers. Greetings, filler/noise, and repeat requests are excluded.")
+        tm1.metric("Total Time", fmt_duration(overall_seconds))
+        tm2.metric("Avg Answer Time", fmt_duration(avg_answer_seconds))
+        tm3.metric("Evaluated", evaluated)
 
         st.divider()
-
-        # ------------------------------------------------
-        # CHARTS
-        # ------------------------------------------------
 
         chart_col1, chart_col2 = st.columns(2)
 
@@ -882,7 +683,7 @@ if st.session_state.interview_finished:
                 ax1.axis("equal")
                 st.pyplot(fig1)
             else:
-                st.caption("No data to chart yet.")
+                st.caption("No data yet.")
 
         with chart_col2:
             st.markdown("**Strong vs Weak Topics**")
@@ -892,77 +693,38 @@ if st.session_state.interview_finished:
             if strong_topics or weak_topics:
                 fig2, ax2 = plt.subplots()
                 ax2.bar(
-                    ["Strong Topics", "Weak Topics"],
+                    ["Strong", "Weak"],
                     [len(strong_topics), len(weak_topics)],
                     color=["#3498db", "#f39c12"]
                 )
                 ax2.set_ylabel("Count")
                 st.pyplot(fig2)
             else:
-                st.caption("No topic data available.")
+                st.caption("No topic data.")
 
         st.divider()
 
-        # ------------------------------------------------
-        # SUMMARY
-        # ------------------------------------------------
-
         if report.get("summary"):
-            st.markdown("### 📝 Overall Summary")
+            st.markdown("**Summary**")
             st.write(report["summary"])
-
-        # ------------------------------------------------
-        # STRENGTHS / WEAKNESSES LISTS
-        # ------------------------------------------------
 
         col_s, col_w = st.columns(2)
 
         with col_s:
-            st.markdown("### 💪 Strengths")
-            if strong_topics:
-                for item in strong_topics:
-                    st.write(f"✅ {item}")
-            else:
-                st.caption("None identified.")
+            st.markdown("**Strengths**")
+            for item in strong_topics:
+                st.write(f"• {item}")
 
         with col_w:
-            st.markdown("### 📌 Areas for Improvement")
-            if weak_topics:
-                for item in weak_topics:
-                    st.write(f"⚠️ {item}")
-            else:
-                st.caption("None identified.")
+            st.markdown("**Improve**")
+            for item in weak_topics:
+                st.write(f"• {item}")
 
-        st.divider()
-        st.markdown("### 🤖 AI Interview Coach")
-        coach_col1, coach_col2 = st.columns(2)
-        with coach_col1:
-            st.markdown("**💪 Strong Areas**")
-            if strong_topics:
-                for item in strong_topics[:4]:
-                    st.write(f"✅ {item}")
-            else:
-                st.write("Build consistency across the interview topics.")
-        with coach_col2:
-            st.markdown("**📚 Improve Next**")
-            if weak_topics:
-                for item in weak_topics[:4]:
-                    st.write(f"🎯 {item}")
-            else:
-                st.write("Keep practicing deeper explanations and timed answers.")
-
-        st.caption("Performance, timing and readiness are based only on evaluated interview answers. Filler/noise and repeat requests are excluded.")
-
-        with st.expander("🔍 View complete report (raw JSON)"):
+        with st.expander("Raw report"):
             st.json(report)
 
     else:
-
-        st.error(
-            "The interview finished, but the final "
-            "report could not be loaded."
-        )
-
+        st.error("Could not load report.")
         if st.session_state.report_error:
             st.code(st.session_state.report_error)
 
@@ -973,20 +735,12 @@ if st.session_state.interview_finished:
 # ANSWER AREA
 # ============================================================
 
-st.divider()
-st.subheader("Your Answer")
-
-
-# ============================================================
-# VOICE MODE
-# ============================================================
 if st.session_state.interview_mode == "🎙️ Voice Interview":
-
-    st.write("🎙️ Record your answer using the microphone.")
 
     audio_value = st.audio_input(
         "Record your answer",
-        key=f"audio_{st.session_state.audio_key}"
+        key=f"audio_{st.session_state.audio_key}",
+        label_visibility="collapsed"
     )
 
     if audio_value is not None:
@@ -997,38 +751,30 @@ if st.session_state.interview_mode == "🎙️ Voice Interview":
 
             audio_bytes = audio_value.getvalue()
 
-            # Bahut chhoti recording = likely silence/no speech
             if len(audio_bytes) < 8000:
-
                 st.warning("Recording seems too short. Please try again.")
-
                 st.session_state.is_processing = False
                 st.session_state.audio_key += 1
-
                 st.rerun()
 
             else:
-
-                with st.spinner("🎧 Transcribing your answer..."):
+                with st.spinner("Transcribing..."):
                     transcript = transcribe_audio(audio_value)
 
                 if transcript and len(transcript.strip()) > 2:
 
                     st.session_state.transcript = transcript
-                    st.info(f"📝 You said: {transcript}")
 
-                    with st.spinner("🤖 AI is evaluating your answer..."):
-                        ai_reply = send_message(transcript)
+                    with st.spinner("Thinking..."):
+                        ai_reply = send_message(transcript, target_role=st.session_state.confirmed_role)
 
                     if ai_reply:
-
-                        with st.spinner("🔊 Generating AI voice..."):
+                        with st.spinner("..."):
                             audio = generate_speech(ai_reply)
 
                         if audio:
                             st.session_state.last_audio = audio
 
-                            # Delay answer countdown for the full interviewer speech.
                             if st.session_state.new_question_pending:
                                 duration = get_audio_duration(audio)
                                 start_question_timer(delay=duration)
@@ -1037,43 +783,22 @@ if st.session_state.interview_mode == "🎙️ Voice Interview":
 
                 st.session_state.is_processing = False
                 st.session_state.audio_key += 1
-
                 st.rerun()
 
 
-# ============================================================
-# TEXT MODE
-# ============================================================
-
 else:
 
-    text_answer = st.text_area(
-        "Type your answer",
-        key=f"text_{st.session_state.text_key}",
-        height=150,
-        placeholder="Type your answer here..."
-    )
+    text_answer = st.chat_input("Type your answer...")
 
-    if st.button(
-        "📤 Submit Answer",
-        type="primary",
-        use_container_width=True
-    ):
+    if text_answer and text_answer.strip():
 
-        if text_answer.strip():
+        with st.spinner("Thinking..."):
+            ai_reply = send_message(text_answer, target_role=st.session_state.confirmed_role)
 
-            with st.spinner("🤖 AI is evaluating your answer..."):
-                ai_reply = send_message(text_answer)
+        if ai_reply and st.session_state.new_question_pending:
+            start_question_timer()
 
-            if ai_reply and st.session_state.new_question_pending:
-                # Text has no speech delay, so the question is already visible.
-                start_question_timer()
-
-            st.session_state.text_key += 1
-            st.rerun()
-
-        else:
-            st.warning("Please enter an answer first.")
+        st.rerun()
 
 
 # ============================================================
@@ -1085,10 +810,6 @@ if (
     and st.session_state.last_audio
     and not st.session_state.interview_finished
 ):
-
-    st.divider()
-    st.subheader("🔊 AI Interviewer")
-
     st.audio(
         st.session_state.last_audio,
         format="audio/mpeg",

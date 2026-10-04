@@ -1,99 +1,94 @@
 # InterviewIQ AI
 
-> **An AI-powered Data Science Interview Simulator** that conducts realistic, adaptive technical interviews, evaluates candidate answers, provides guided hints, and generates a structured feedback report.
+> **An AI-powered, role-agnostic Interview Simulator** that conducts realistic, adaptive technical interviews for any job role, evaluates candidate answers in real time, provides guided hints, and generates a structured feedback report.
 
-InterviewIQ AI is a hands-on AI project built to explore **FastAPI, LLM integration, RAG, Redis-based conversation memory, vector databases, and structured LLM evaluation**.
+InterviewIQ AI is a hands-on AI project built to explore **FastAPI, LLM integration, RAG, Redis-based conversation memory, vector databases, structured LLM evaluation, and voice I/O**.
 
 ---
 
 ## 🚀 Features
 
+### 🎯 Role-Agnostic Interviews
+
+* Not limited to a single domain — can conduct interviews for **any role** (Data Science, Backend Development, Product Management, etc.).
+* Upload a resume and the system **suggests a target role and relevant skills** automatically.
+* The candidate can **confirm or override** the suggested role before starting.
+* The interview questions and evaluation criteria adapt dynamically based on the confirmed role.
+
 ### 💬 Conversational Interview Flow
 
-* Conducts a realistic technical interview through conversation.
-* Asks questions one at a time.
-* Adapts the interview based on the candidate's responses.
-* Naturally concludes after a predefined number of questions.
+* Conducts a realistic technical interview through natural conversation.
+* Asks one question at a time and waits for a real candidate response.
+* Gives exactly one guided hint on an incorrect/incomplete answer, then moves on.
+* Code-level safeguards (not just prompting) ensure the interview progresses correctly — question limits, stuck-question detection, and empty-response handling are all enforced in the backend rather than left to the LLM.
+
+### 🎙️ Voice or Text Interview
+
+* Candidates can answer by **speaking** (transcribed via Groq Whisper) or by **typing**.
+* AI interviewer questions are read aloud via text-to-speech (gTTS) in voice mode.
+* Silence and transcription hallucinations are filtered out before being treated as an answer.
 
 ### 🔎 Retrieval-Augmented Question Bank (RAG)
 
-* Uses a curated **25-question Data Science question bank**.
-* Dynamically retrieves relevant questions using:
-
-  * **ChromaDB**
-  * **Sentence Transformers**
-  * `all-MiniLM-L6-v2` embeddings
-* Question retrieval is influenced by the direction of the conversation.
+* Uses **ChromaDB** + **Sentence Transformers** (`all-MiniLM-L6-v2`) to retrieve topic-relevant questions as *inspiration* for the interviewer.
+* The LLM is instructed to use retrieved questions only as a guide — never copy them verbatim, and to ignore them if they don't fit the candidate's role.
 
 ### 🧠 Persistent Conversation Memory
 
-* Uses **Redis** to maintain:
-
+* Uses **Redis** (hosted on Upstash) to maintain:
   * Conversation history
-  * Interview state
+  * Interview state (phase, question count, correctness streaks)
   * Candidate progress
-* Context persists across requests and backend restarts within the session TTL.
-
-### 💡 Guided Hints — Not Answers
-
-* Candidates can ask for help when they don't know an answer.
-* The interviewer provides a **directional hint** instead of revealing the solution.
-* Helps simulate a realistic interview environment.
+* Context persists across requests within the session TTL.
 
 ### 📊 Automated Answer Evaluation
 
-Every technical answer is evaluated using a dedicated LLM call.
+* Every technical answer is evaluated using a dedicated, structured LLM call (JSON output).
+* Results are tracked via **server-side interview state**, not by trusting LLM-generated text — this is a deliberate design principle used throughout the backend.
 
-The evaluation returns a structured result containing:
+### ⏱️ Live Interview Timer
 
-* Correct / Incorrect judgment
-* Topic information
-* Evaluation reasoning
-
-The result is tracked using **server-side interview state**, rather than relying only on generated LLM text.
+* Overall interview countdown and per-question answer timer, both visible in a minimal status bar.
+* Timer accounts for interviewer speech duration in voice mode before starting the candidate's answer clock.
 
 ### 📈 End-of-Interview Feedback Report
 
-At the end of the interview, the system generates a structured report containing:
-
-* Total questions
-* Correct answers
-* Incorrect answers
-* Strong topics
-* Weak topics
+* Total questions, correct/incorrect counts, accuracy
+* Strong and weak topics
 * Overall performance summary
+* Total interview time and average answer time
+* Visual charts (correct vs. incorrect, strong vs. weak topics)
 
-### 🖥️ Streamlit Interface
+### 🖥️ Minimal, Chat-Style Interface
 
-A clean chat-based frontend built with Streamlit provides:
-
-* Real-time interview interaction
-* Session reset
-* Live conversation history
-* Interview report generation
+* Clean, centered Streamlit interface inspired by ChatGPT/Claude.
+* Simple message bubbles, slim status bar, minimal sidebar.
 
 ---
 
 ## 🛠️ Tech Stack
 
-| Layer               | Technology                          |
-| ------------------- | ----------------------------------- |
-| Backend             | FastAPI, Pydantic                   |
-| LLM Inference       | Groq API, `llama-3.3-70b-versatile` |
-| LLM SDK             | OpenAI-compatible SDK               |
-| Conversation Memory | Redis                               |
-| Vector Database     | ChromaDB                            |
-| Embeddings          | Sentence Transformers               |
-| Embedding Model     | `all-MiniLM-L6-v2`                  |
-| Frontend            | Streamlit                           |
-| Containerization    | Docker                              |
-| Language            | Python                              |
+| Layer                | Technology                                  |
+| --------------------- | -------------------------------------------- |
+| Backend               | FastAPI, Pydantic                            |
+| LLM Inference         | Groq API, `openai/gpt-oss-120b`              |
+| LLM SDK               | OpenAI-compatible SDK                        |
+| Speech-to-Text        | Groq Whisper (`whisper-large-v3`)            |
+| Text-to-Speech        | gTTS                                         |
+| Conversation Memory   | Redis (hosted on Upstash)                    |
+| Vector Database       | ChromaDB                                     |
+| Embeddings            | Sentence Transformers (`all-MiniLM-L6-v2`)   |
+| Resume Parsing        | PyPDF2                                       |
+| Frontend              | Streamlit                                    |
+| Language              | Python                                       |
 
 ### Why not LangChain?
 
-LangChain was evaluated during development but deliberately not adopted.
+LangChain was evaluated during development but deliberately not adopted. The project uses the **raw SDK approach** because the application's requirements around memory, retrieval, evaluation, and error handling could be implemented directly without adding another abstraction layer.
 
-The project uses the **raw SDK approach** because the application's requirements around memory, retrieval, evaluation, and error handling could be implemented directly without adding another abstraction layer.
+### Why not Docker?
+
+The project initially used Docker for local Redis and planned containerized deployment. Docker Desktop's background resource usage (a persistent WSL2 VM) proved heavy for local development, so Redis was moved to a managed cloud instance (Upstash) instead — removing the need for Docker entirely during development.
 
 ---
 
@@ -113,9 +108,9 @@ The project uses the **raw SDK approach** because the application's requirements
               │                │                │
               ▼                ▼                ▼
        ┌─────────────┐  ┌─────────────┐  ┌─────────────┐
-       │   Groq API  │  │    Redis    │  │  ChromaDB   │
-       │     LLM     │  │   Memory    │  │  Question   │
-       │             │  │   + State   │  │    Bank     │
+       │   Groq API  │  │ Redis Cloud │  │  ChromaDB   │
+       │  LLM + STT  │  │  (Upstash)  │  │  Question   │
+       │   + TTS     │  │ Memory+State│  │    Bank     │
        └─────────────┘  └─────────────┘  └─────────────┘
 ```
 
@@ -129,28 +124,28 @@ For every `/chat` request, the backend follows this flow:
 Candidate Message
        │
        ▼
-Fetch Conversation History
+Fetch Conversation History + State (Redis)
        │
        ▼
-Fetch Interview State
+Filter Noise / Filler / Repeat Requests
        │
        ▼
-Retrieve Relevant Questions
+Evaluate Previous Answer (if applicable)
        │
        ▼
-Evaluate Previous Answer
+Check Question Limit → Wrap Up If Reached
        │
        ▼
-Send Context + Instructions to LLM
+Check Consecutive-Wrong Streak → Force-Skip If Stuck
        │
        ▼
-Generate Next Interviewer Response
+Retrieve Relevant Questions (RAG)
        │
        ▼
-Update Interview State
+Generate Next Interviewer Response (role-aware prompt)
        │
        ▼
-Persist Data in Redis
+Update + Persist Interview State (Redis)
        │
        ▼
 Return Response to Streamlit
@@ -175,18 +170,16 @@ interviewiq-ai/
 │   │   └── interview_state.py
 │   │       └── Pydantic interview state model
 │   │
-│   ├── routers/
-│   │
 │   └── services/
 │       ├── groq_service.py
-│       │   └── LLM calls, evaluation & report generation
+│       │   └── LLM calls, evaluation, transcription, TTS & report generation
 │       │
 │       └── vector_store.py
 │           └── ChromaDB setup & question retrieval
 │
 ├── data/
 │   └── questions.json
-│       └── Curated Data Science question bank
+│       └── Question bank used for RAG inspiration
 │
 ├── streamlit_app.py
 │   └── Streamlit chat interface
@@ -205,14 +198,12 @@ interviewiq-ai/
 
 ## Prerequisites
 
-Make sure the following are installed:
-
 * Python **3.11+**
-* Docker Desktop
 * Git
 * A free **Groq API key**
+* A free **Upstash Redis database**
 
-> No credit card is required for the Groq API key.
+> No credit card is required for either Groq or Upstash free tiers.
 
 ---
 
@@ -220,7 +211,6 @@ Make sure the following are installed:
 
 ```bash
 git clone https://github.com/anshikasaini914/interviewiq-ai.git
-
 cd interviewiq-ai
 ```
 
@@ -232,7 +222,6 @@ cd interviewiq-ai
 
 ```bash
 python -m venv venv
-
 venv\Scripts\activate
 ```
 
@@ -240,7 +229,6 @@ venv\Scripts\activate
 
 ```bash
 python -m venv venv
-
 source venv/bin/activate
 ```
 
@@ -254,36 +242,21 @@ pip install -r requirements.txt
 
 ---
 
-## 4. Configure Environment Variables
+## 4. Set Up Redis (Upstash)
 
-Create a `.env` file based on `.env.example`.
-
-```env
-GROQ_API_KEY=your_actual_groq_api_key
-```
-
-Replace `your_actual_groq_api_key` with your Groq API key.
+1. Create a free account at [upstash.com](https://upstash.com)
+2. Create a new Redis database
+3. Open the **Connect** tab and copy the `rediss://` connection string (not the REST API URL)
 
 ---
 
-## 5. Start Redis Using Docker
+## 5. Configure Environment Variables
 
-Run:
+Create a `.env` file based on `.env.example`:
 
-```bash
-docker run -d --name redis-interviewiq -p 6379:6379 redis
-```
-
-If the container already exists:
-
-```bash
-docker start redis-interviewiq
-```
-
-You can verify that Redis is running with:
-
-```bash
-docker ps
+```env
+GROQ_API_KEY=your_actual_groq_api_key
+REDIS_URL=rediss://default:your_password@your-db.upstash.io:6379
 ```
 
 ---
@@ -296,159 +269,106 @@ Populate the local ChromaDB vector store:
 python load_questions.py
 ```
 
-This only needs to be executed once unless the question bank is changed.
-
-The vector database will be created locally at:
-
-```text
-./chroma_data
-```
+This only needs to be run once unless the question bank is changed. The vector database is created locally at `./chroma_data`.
 
 ---
 
 ## 7. Start the FastAPI Backend
 
-Run:
-
 ```bash
 uvicorn app.main:app --reload
 ```
 
-The backend will start at:
-
-```text
-http://127.0.0.1:8000
-```
-
-Interactive API documentation:
-
-```text
-http://127.0.0.1:8000/docs
-```
+Backend: `http://127.0.0.1:8000`
+API docs: `http://127.0.0.1:8000/docs`
 
 ---
 
 ## 8. Start the Streamlit Frontend
 
-Open a **new terminal** and activate the virtual environment again.
-
-Then run:
+Open a **new terminal**, activate the virtual environment again, then:
 
 ```bash
 streamlit run streamlit_app.py
 ```
 
-The application will be available at:
-
-```text
-http://localhost:8501
-```
+App: `http://localhost:8501`
 
 ---
 
 # 🧪 Example Interview Flow
 
 ```text
-Interviewer:
-Welcome! Let's begin your Data Science interview.
+Candidate uploads a resume → system suggests "Backend Developer"
+as the target role with skills: Python, FastAPI, SQL.
+Candidate confirms the role and starts.
 
 Interviewer:
-What is the difference between supervised and unsupervised learning?
+Hello, I'm Alex, a senior technical interviewer. We'll have a
+brief interview covering topics relevant to a Backend Developer
+role. Could you start by introducing yourself?
 
 Candidate:
-Supervised learning uses labelled data while unsupervised
-learning works with unlabelled data.
+[introduces themselves]
 
 Interviewer:
-Good. Let's move to the next question.
-
-Interviewer:
-What is overfitting and how can you prevent it?
+Can you explain the difference between SQL and NoSQL databases,
+and when you'd choose one over the other?
 
 Candidate:
 I don't know.
 
 Interviewer:
-Think about a model that performs very well on training
-data but poorly on unseen data. What problem could cause this?
+Think about how each stores and structures data — one uses fixed
+tables, the other is more flexible. How would you compare them?
+
+Candidate:
+[answers]
 
 Interviewer:
-Let's continue with another question.
+Correct. Let's move to a different topic...
 ```
-
-The system evaluates answers in the backend and maintains the candidate's progress throughout the interview.
 
 ---
 
 # 🧠 Core AI Components
 
-## 1. RAG-Based Question Retrieval
+## 1. Dynamic, Role-Aware Prompting
 
-The question bank is converted into embeddings using:
+The interviewer's system prompt is generated at runtime based on the candidate's confirmed target role, rather than being hardcoded to a single domain.
 
-```text
-all-MiniLM-L6-v2
-```
+## 2. RAG-Based Question Retrieval
 
-These embeddings are stored in ChromaDB.
+Question embeddings (`all-MiniLM-L6-v2`) are stored in ChromaDB. The system retrieves semantically relevant questions as inspiration for the LLM — the LLM is explicitly instructed to ignore them if they don't fit the candidate's role.
 
-When the candidate responds, the system retrieves semantically relevant questions instead of selecting questions completely at random.
+## 3. Conversation Memory
 
----
-
-## 2. Conversation Memory
-
-Redis stores session-specific information such as:
+Redis stores session-specific information:
 
 ```text
 Conversation History
-Interview State
-Question Count
-Correct Answers
-Incorrect Answers
-Topics Covered
+Interview State (phase, question count, correctness streak)
+Correct / Incorrect Answers
+Target Role
+Timing Metrics
 ```
 
-This allows the backend to maintain context across multiple `/chat` requests.
+## 4. LLM-Based Evaluation
 
----
+Candidate answers are evaluated using a separate, structured LLM call that returns correctness as JSON — this result drives the backend state rather than being inferred from conversational text.
 
-## 3. LLM-Based Evaluation
+## 5. Code-Enforced Interview Control
 
-Candidate answers are evaluated using a separate LLM call.
+Several critical behaviors are enforced in code rather than left to prompting alone:
 
-Conceptually:
+* Question-count limits and wrap-up
+* Force-skipping a question after repeated incorrect answers
+* Filtering filler/noise/repeat-request speech before evaluation
+* Retry-and-fallback handling for empty LLM responses
 
-```text
-Candidate Answer
-       │
-       ▼
-Evaluation LLM
-       │
-       ├── Correct / Incorrect
-       ├── Topic
-       └── Evaluation
-```
+## 6. Feedback Generation
 
-The evaluation result is then stored in server-side interview state.
-
----
-
-## 4. Feedback Generation
-
-After the interview finishes:
-
-```text
-Interview State
-      │
-      ▼
-Feedback LLM
-      │
-      ▼
-Structured Report
-```
-
-The report summarizes the candidate's overall performance and highlights strong and weak areas.
+After the interview finishes, a dedicated LLM call analyzes the full transcript to produce strong/weak topics and a summary, combined with backend-tracked counts and timing.
 
 ---
 
@@ -462,98 +382,58 @@ Interview Performance Report
 Total Questions: 10
 Correct: 7
 Incorrect: 3
+Accuracy: 70%
 
 Strong Topics:
-- Probability
-- Machine Learning
-- Statistics
+- API Design
+- SQL
 
 Weak Topics:
-- SQL
-- Feature Engineering
+- System Design
+
+Total Interview Time: 14:32
+Average Answer Time: 00:48
 
 Overall Summary:
-The candidate demonstrates a good understanding of core
-Data Science concepts but needs more practice with SQL
-and feature engineering.
+The candidate demonstrates solid understanding of API design and
+SQL fundamentals, but would benefit from more practice with
+system design concepts.
 ```
 
 ---
 
 # ⚠️ Known Limitations
 
-### 1. Hint Leakage
+### 1. Question Bank Coverage
 
-The hint-generation system relies primarily on prompt-based instructions to prevent the LLM from revealing answers.
+The RAG question bank was originally curated for Data Science and has since been cleared out as the project generalized to any role. The LLM currently generates questions using its own judgment, guided by the candidate's stated role and skills, rather than a populated multi-role question bank.
 
-During testing, the model occasionally reveals partial definitions or important keywords despite explicit instructions.
+**Planned improvement:** build out a multi-role question bank with role metadata for more consistent, curated questions across domains.
 
-This is a known limitation of **prompt-only guardrails**, particularly with smaller open-source models.
+### 2. Hint Leakage
 
-### Planned Improvement
+The hint-generation system relies primarily on prompt-based instructions to avoid revealing answers. The model occasionally reveals partial definitions despite explicit instructions — a known limitation of prompt-only guardrails with smaller open-source models.
 
-Implement a code-level post-processing layer that validates generated hints before returning them to the candidate.
-
----
-
-### 2. Approximate Question Counting
-
-Currently, every candidate message can contribute toward the question limit.
-
-For example:
-
-```text
-Candidate Answer
-      ↓
-Hint Request
-      ↓
-Hint Retry
-```
-
-These interactions may affect the question count even though they do not represent completely new interview questions.
-
-A future version will track **distinct questions** instead.
-
----
+**Planned improvement:** a code-level post-processing layer that validates generated hints before returning them to the candidate.
 
 ### 3. Session Persistence
 
-The frontend stores the `session_id` using Streamlit session state.
+The frontend stores `session_id` in Streamlit session state. A browser refresh starts a new Streamlit session (and a new `session_id`); the previous Redis session remains until its 1-hour TTL expires, but isn't automatically reconnected to.
 
-Therefore:
-
-```text
-Browser Refresh
-      ↓
-New Streamlit Session
-      ↓
-New session_id
-```
-
-The previous Redis session may still exist until its **1-hour TTL** expires, but the refreshed browser does not automatically reconnect to it.
-
-### Planned Improvement
-
-Add authentication and persistent user/session management.
+**Planned improvement:** authentication and persistent user/session management.
 
 ---
 
 # 🔮 Future Improvements
 
 * [ ] Authentication and user accounts
-* [ ] Persistent interview history
-* [ ] Resume-based question generation
+* [ ] Persistent interview history across sessions
+* [ ] Multi-role, curated question bank with role metadata
 * [ ] Difficulty levels: Beginner / Intermediate / Advanced
-* [ ] More comprehensive question bank
-* [ ] Better hint validation
-* [ ] Precise distinct-question tracking
+* [ ] Better hint validation (code-level, not just prompt-level)
 * [ ] Interview analytics dashboard
-* [ ] Voice-based interviews
-* [ ] Speech-to-text integration
-* [ ] Text-to-speech interviewer
-* [ ] Personalized interview difficulty
-* [ ] Multiple interview modes
-* [ ] Deployment to a cloud platform
+* [ ] Cloud deployment (Render / Railway)
+* [ ] Multiple interview modes (behavioral, system design, etc.)
 
 ---
 
@@ -561,25 +441,17 @@ Add authentication and persistent user/session management.
 
 This project was built as a hands-on way to learn and apply:
 
-* FastAPI
-* REST APIs
-* Pydantic
-* LLM integration
-* Groq API
-* OpenAI-compatible SDKs
-* Retrieval-Augmented Generation (RAG)
-* Vector databases
-* ChromaDB
-* Sentence Transformers
-* Embeddings
-* Redis
-* Conversation memory
-* Structured LLM evaluation
-* Prompt engineering
-* Streamlit
-* Docker
-* Backend state management
-* Error handling
+* FastAPI and REST API design
+* Pydantic data models
+* LLM integration via Groq and OpenAI-compatible SDKs
+* Retrieval-Augmented Generation (RAG) with ChromaDB
+* Sentence embeddings
+* Redis-based conversation memory and state management
+* Structured LLM evaluation (JSON-mode outputs)
+* Prompt engineering for controllable, dynamic LLM behavior
+* Speech-to-text and text-to-speech integration
+* Streamlit for interactive frontends
+* Debugging real-world LLM instruction-following failures and
+  designing code-level safeguards around them
 
 ---
-
